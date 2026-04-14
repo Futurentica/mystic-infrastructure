@@ -1,38 +1,20 @@
-# Binaries
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-bin/
-dist/
+# Secrets
+*.secret.yaml
+*.key
+*.pem
 
-# Test binary
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# Go workspace file
-go.work
-go.work.sum
+# Local config
+.env
+*.local
 
 # IDE
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
 
 # OS
 .DS_Store
-Thumbs.db
 
-# Docker
+# Temp files
+*.tmp
 *.log
-
-# Kubernetes generated
-*.secret.yaml

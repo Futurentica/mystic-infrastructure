@@ -1,0 +1,51 @@
+name: PR Deploy
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  trigger-deploy:
+    if: |
+      github.event.issue.pull_request && 
+      contains(github.event.comment.body, '/deploy')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Get PR branch
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            return { branch: pr.data.head.ref };
+      
+      - name: Trigger deploy workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-dev.yml',  # 👈 вызываем workflow микросервиса
+              ref: '${{ fromJSON(steps.pr.outputs.result).branch }}',
+              inputs: {
+                'image-tag': `pr-${{ github.event.issue.number }}`,
+                'show-logs': 'true'
+              }
+            });
+      
+      - name: Add reaction
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });

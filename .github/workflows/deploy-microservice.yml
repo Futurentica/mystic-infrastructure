@@ -1,0 +1,132 @@
+name: Deploy to Dev K3s (Mini)
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        description: 'Service name (auto-detected if empty)'
+        required: false
+        type: string
+        default: ''
+      build-no-cache:
+        description: 'Build Docker without cache'
+        required: false
+        type: boolean
+        default: false
+      show-logs:
+        description: 'Show logs after deployment'
+        required: false
+        type: boolean
+        default: false
+      run-tests:
+        description: 'Run Go tests'
+        required: false
+        type: boolean
+        default: true
+      go-version:
+        description: 'Go version'
+        required: false
+        type: string
+        default: '1.26'
+      namespace:
+        description: 'Kubernetes namespace'
+        required: false
+        type: string
+        default: 'mystic-platform'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Detect service name
+        id: detect
+        run: |
+          if [ -z "${{ inputs.service-name }}" ]; then
+            SERVICE_NAME=${GITHUB_REPOSITORY##*/}
+          else
+            SERVICE_NAME="${{ inputs.service-name }}"
+          fi
+          echo "service-name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "Detected service: $SERVICE_NAME"
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+      
+      - name: Download Go modules
+        run: go mod download
+      
+      - name: Run tests
+        if: ${{ inputs.run-tests == 'true' }}
+        run: |
+          go test -v -race ./...
+          echo "✅ Tests passed"
+      
+      - name: Build Docker image
+        id: build
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
+          docker build \
+            -t ${{ steps.detect.outputs.service-name }}:${TIMESTAMP} \
+            -t ${{ steps.detect.outputs.service-name }}:latest \
+            ${{ inputs.build-no-cache == 'true' && '--no-cache' || '' }} \
+            .
+          
+          echo "✅ Image built: ${{ steps.detect.outputs.service-name }}:${TIMESTAMP}"
+      
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          sudo cp /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
+          sudo chown $USER:$USER $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          echo "✅ kubeconfig configured"
+      
+      - name: Import image to K3s
+        run: |
+          docker save ${{ steps.detect.outputs.service-name }}:latest | sudo k3s ctr images import -
+          echo "✅ Image imported to K3s"
+      
+      - name: Restart deployment
+        run: |
+          kubectl rollout restart deployment/${{ steps.detect.outputs.service-name }} \
+            -n ${{ inputs.namespace }}
+          
+          kubectl rollout status deployment/${{ steps.detect.outputs.service-name }} \
+            -n ${{ inputs.namespace }} \
+            --timeout=60s
+          
+          echo "✅ Deployment restarted"
+      
+      - name: Show logs
+        if: ${{ inputs.show-logs == 'true' }}
+        run: |
+          echo "📋 Last 50 logs:"
+          kubectl logs -n ${{ inputs.namespace }} \
+            deployment/${{ steps.detect.outputs.service-name }} \
+            --tail=50
+      
+      - name: Cleanup images
+        run: |
+          docker image prune -f
+          sudo k3s ctr images prune --quiet
+          echo "✅ Cleanup completed"
+      
+      - name: Deployment summary
+        run: |
+          echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Service** | ${{ steps.detect.outputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.detect.outputs.service-name }}:${{ steps.build.outputs.timestamp }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Namespace** | ${{ inputs.namespace }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tests** | ${{ inputs.run-tests == 'true' && '✅ Run' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY

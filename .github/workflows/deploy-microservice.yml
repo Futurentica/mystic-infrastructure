@@ -7,7 +7,7 @@ on:
         description: 'Service name (auto-detected if empty)'
         required: false
         type: string
-        default: ''
+        default: ''  # 👈 Пустое значение по умолчанию
       build-no-cache:
         description: 'Build Docker without cache'
         required: false
@@ -46,6 +46,7 @@ jobs:
         id: detect
         run: |
           if [ -z "${{ inputs.service-name }}" ]; then
+            # Автоопределение из имени репозитория
             SERVICE_NAME=${GITHUB_REPOSITORY##*/}
           else
             SERVICE_NAME="${{ inputs.service-name }}"
@@ -62,7 +63,7 @@ jobs:
         run: go mod download
       
       - name: Run tests
-        if: ${{ inputs.run-tests == 'true' }}
+        if: ${{ inputs.run-tests == true }}
         run: |
           go test -v -race ./...
           echo "✅ Tests passed"
@@ -76,7 +77,7 @@ jobs:
           docker build \
             -t ${{ steps.detect.outputs.service-name }}:${TIMESTAMP} \
             -t ${{ steps.detect.outputs.service-name }}:latest \
-            ${{ inputs.build-no-cache == 'true' && '--no-cache' || '' }} \
+            ${{ inputs.build-no-cache == true && '--no-cache' || '' }} \
             .
           
           echo "✅ Image built: ${{ steps.detect.outputs.service-name }}:${TIMESTAMP}"
@@ -87,12 +88,11 @@ jobs:
           sudo cp /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
           sudo chown $USER:$USER $HOME/.kube/config
           chmod 600 $HOME/.kube/config
-          echo "✅ kubeconfig configured"
       
       - name: Import image to K3s
         run: |
           docker save ${{ steps.detect.outputs.service-name }}:latest | sudo k3s ctr images import -
-          echo "✅ Image imported to K3s"
+          echo "✅ Image imported"
       
       - name: Restart deployment
         run: |
@@ -106,9 +106,8 @@ jobs:
           echo "✅ Deployment restarted"
       
       - name: Show logs
-        if: ${{ inputs.show-logs == 'true' }}
+        if: ${{ inputs.show-logs == true }}
         run: |
-          echo "📋 Last 50 logs:"
           kubectl logs -n ${{ inputs.namespace }} \
             deployment/${{ steps.detect.outputs.service-name }} \
             --tail=50
@@ -117,16 +116,9 @@ jobs:
         run: |
           docker image prune -f
           sudo k3s ctr images prune --quiet
-          echo "✅ Cleanup completed"
       
       - name: Deployment summary
         run: |
           echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Service** | ${{ steps.detect.outputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Image** | \`${{ steps.detect.outputs.service-name }}:${{ steps.build.outputs.timestamp }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Namespace** | ${{ inputs.namespace }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tests** | ${{ inputs.run-tests == 'true' && '✅ Run' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY

@@ -1,4 +1,5 @@
 name: Deploy to Dev K3s (Mini)
+name: Reusable Deploy to K3s
 
 on:
   workflow_call:
@@ -33,16 +34,6 @@ on:
         required: false
         type: string
         default: 'mystic-platform'
-      image-tag:
-        description: 'Custom image tag (default: timestamp or pr-XXX)'
-        required: false
-        type: string
-        default: ''
-      deployment-name:
-        description: 'Custom deployment name (default: same as service-name)'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   deploy:
@@ -61,7 +52,6 @@ jobs:
             SERVICE_NAME="${{ inputs.service-name }}"
           fi
           echo "service-name=$SERVICE_NAME" >> $GITHUB_OUTPUT
-          echo "deployment-name=${{ inputs.deployment-name != '' && inputs.deployment-name || SERVICE_NAME }}" >> $GITHUB_OUTPUT
           echo "Detected service: $SERVICE_NAME"
       
       - name: Setup Go
@@ -78,24 +68,19 @@ jobs:
           go test -v -race ./...
           echo "✅ Tests passed"
       
-      - name: Determine image tag
-        id: tag
-        run: |
-          if [ -n "${{ inputs.image-tag }}" ]; then
-            echo "tag=${{ inputs.image-tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
-          fi
-      
       - name: Build Docker image
+        id: build
         run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          
           docker build \
-            -t ${{ steps.detect.outputs.service-name }}:${{ steps.tag.outputs.tag }} \
+            -t ${{ steps.detect.outputs.service-name }}:${TIMESTAMP} \
             -t ${{ steps.detect.outputs.service-name }}:latest \
             ${{ inputs.build-no-cache == true && '--no-cache' || '' }} \
             .
           
-          echo "✅ Image built: ${{ steps.detect.outputs.service-name }}:${{ steps.tag.outputs.tag }}"
+          echo "✅ Image built: ${{ steps.detect.outputs.service-name }}:${TIMESTAMP}"
       
       - name: Setup kubeconfig
         run: |
@@ -112,10 +97,10 @@ jobs:
       
       - name: Restart deployment
         run: |
-          kubectl rollout restart deployment/${{ steps.detect.outputs.deployment-name }} \
+          kubectl rollout restart deployment/${{ steps.detect.outputs.service-name }} \
             -n ${{ inputs.namespace }}
           
-          kubectl rollout status deployment/${{ steps.detect.outputs.deployment-name }} \
+          kubectl rollout status deployment/${{ steps.detect.outputs.service-name }} \
             -n ${{ inputs.namespace }} \
             --timeout=60s
           
@@ -126,7 +111,7 @@ jobs:
         run: |
           echo "📋 Last 50 logs:"
           kubectl logs -n ${{ inputs.namespace }} \
-            deployment/${{ steps.detect.outputs.deployment-name }} \
+            deployment/${{ steps.detect.outputs.service-name }} \
             --tail=50
       
       - name: Cleanup Docker images
@@ -142,10 +127,11 @@ jobs:
       - name: Deployment summary
         run: |
           echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Service** | ${{ steps.detect.outputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Deployment** | ${{ steps.detect.outputs.deployment-name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image Tag** | \`${{ steps.tag.outputs.tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.detect.outputs.service-name }}:${{ steps.build.outputs.timestamp }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Namespace** | ${{ inputs.namespace }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Tests** | ${{ inputs.run-tests == true && '✅ Run' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY

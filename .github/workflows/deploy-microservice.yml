@@ -7,7 +7,7 @@ on:
         description: 'Service name (auto-detected if empty)'
         required: false
         type: string
-        default: ''  # 👈 Пустое значение по умолчанию
+        default: ''
       build-no-cache:
         description: 'Build Docker without cache'
         required: false
@@ -46,7 +46,6 @@ jobs:
         id: detect
         run: |
           if [ -z "${{ inputs.service-name }}" ]; then
-            # Автоопределение из имени репозитория
             SERVICE_NAME=${GITHUB_REPOSITORY##*/}
           else
             SERVICE_NAME="${{ inputs.service-name }}"
@@ -88,11 +87,12 @@ jobs:
           sudo cp /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
           sudo chown $USER:$USER $HOME/.kube/config
           chmod 600 $HOME/.kube/config
+          echo "✅ kubeconfig configured"
       
       - name: Import image to K3s
         run: |
           docker save ${{ steps.detect.outputs.service-name }}:latest | sudo k3s ctr images import -
-          echo "✅ Image imported"
+          echo "✅ Image imported to K3s"
       
       - name: Restart deployment
         run: |
@@ -108,17 +108,30 @@ jobs:
       - name: Show logs
         if: ${{ inputs.show-logs == true }}
         run: |
+          echo "📋 Last 50 logs:"
           kubectl logs -n ${{ inputs.namespace }} \
             deployment/${{ steps.detect.outputs.service-name }} \
             --tail=50
       
-      - name: Cleanup images
+      - name: Cleanup Docker images
         run: |
-          docker image prune -f
-          sudo k3s ctr images prune --quiet
+          docker image prune -a -f
+          echo "✅ Docker images cleaned"
+      
+      - name: Cleanup containerd images
+        run: |
+          sudo k3s ctr images prune --all || true
+          echo "✅ Containerd images cleaned"
       
       - name: Deployment summary
         run: |
           echo "## 🎉 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Service** | ${{ steps.detect.outputs.service-name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Image** | \`${{ steps.detect.outputs.service-name }}:${{ steps.build.outputs.timestamp }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Namespace** | ${{ inputs.namespace }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tests** | ${{ inputs.run-tests == true && '✅ Run' || '⏭️ Skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache** | ${{ inputs.build-no-cache == true && '❌ No cache' || '✅ Enabled' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY

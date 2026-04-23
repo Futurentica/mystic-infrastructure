@@ -96,10 +96,10 @@ jobs:
       
       - name: Restart deployment
         run: |
-          kubectl rollout restart deployment/${{ steps.detect.outputs.service-name }} \
+          sudo k3s kubectl rollout restart deployment/${{ steps.detect.outputs.service-name }} \
             -n ${{ inputs.namespace }}
           
-          kubectl rollout status deployment/${{ steps.detect.outputs.service-name }} \
+          sudo k3s kubectl rollout status deployment/${{ steps.detect.outputs.service-name }} \
             -n ${{ inputs.namespace }} \
             --timeout=60s
           

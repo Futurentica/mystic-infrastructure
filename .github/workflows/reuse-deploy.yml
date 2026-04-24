@@ -96,6 +96,14 @@ jobs:
       
       - name: Restart deployment
         run: |
+          # Применить только если деплой НЕ существует
+          if ! kubectl get deployment ${{ steps.detect.outputs.service-name }} -n ${{ inputs.namespace }} &>/dev/null; then
+            echo "Deployment doesn't exist, creating..."
+            kubectl apply -f k8s/deployment.yaml -n ${{ inputs.namespace }}
+          else
+            echo "Deployment already exists, skipping apply (will restart instead)"
+          fi
+          
           kubectl rollout restart deployment/${{ steps.detect.outputs.service-name }} \
             -n ${{ inputs.namespace }}
           
